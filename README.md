@@ -7,7 +7,7 @@
 ## Setup data using Adminer
 1. In your browser, go to localhost:8080
 1. When in Adminer page, select PostgreSQL and use `postgres:postgres` as username and password.
-1. Import the data located in `resources/postgres.sql.gz`.
+1. Import the data located in `resources/postgres.sql`.
 
 To shutdown postgres do `docker-compose down` in your console.
 
