@@ -19,6 +19,10 @@ CREATE TABLE "public"."mate" (
     CONSTRAINT "mate_username_fkey" FOREIGN KEY (username) REFERENCES authuser(username) NOT DEFERRABLE
 ) WITH (oids = false);
 
+INSERT INTO "mate" ("username", "mate") VALUES
+('John',    'Mark'),
+('John',    'Bill');
+
 
 CREATE SEQUENCE session_sessionid_seq INCREMENT 1 MINVALUE 1 MAXVALUE 2147483647 START 1 CACHE 1;
 
@@ -32,9 +36,6 @@ CREATE TABLE "public"."session" (
     CONSTRAINT "session_token" UNIQUE ("token"),
     CONSTRAINT "session_username_fkey" FOREIGN KEY (username) REFERENCES authuser(username) NOT DEFERRABLE
 ) WITH (oids = false);
-
-INSERT INTO "session" ("sessionid", "token", "issueddate", "expireddate", "username") VALUES
-(3, '62e556db-d128-4c2d-8cae-14c383771ef8', '2019-05-04 23:29:44.042+00',   '2019-05-05 23:29:44.042+00',   'John');
 
 
 CREATE SEQUENCE secret_secretid_seq INCREMENT 1 MINVALUE 1 MAXVALUE 2147483647 START 1 CACHE 1;
@@ -59,4 +60,4 @@ CREATE TABLE "public"."permission" (
     CONSTRAINT "permission_secretid_fkey" FOREIGN KEY (secretid) REFERENCES secret(secretid) NOT DEFERRABLE
 ) WITH (oids = false);
 
--- 2019-05-04 23:38:24.310654+00
+-- 2019-05-05 16:56:30.361765+00

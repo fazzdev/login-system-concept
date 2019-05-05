@@ -1,3 +1,3 @@
 package model
 
-case class Session(token: Token, user: User)
+case class Session(user: User, token: Token)

@@ -24,6 +24,7 @@ object Main extends App {
   private implicit val materializer: ActorMaterializer = ActorMaterializer()
   private implicit val userFormat: OFormat[User] = Json.format[User]
   private implicit val tokenFormat: OFormat[Token] = Json.format[Token]
+  private implicit val sessionFormat: OFormat[Session] = Json.format[Session]
 
   private def basicAuthenticator(rawCredentials: Option[HttpCredentials])(basicCredentials: Credentials): Option[User] = {
     // ideally, this logic uses Credentials.Provided(id).verify("password") to avoid timing attack
@@ -42,11 +43,16 @@ object Main extends App {
     }
   }
 
-  private def tokenAuthenticator(credentials: Credentials): Option[Session] = ???
+  private def tokenAuthenticator(credentials: Credentials): Option[Session] = {
+    credentials match {
+      case Credentials.Provided(token) => connection.session(Token(token))
+      case _ => None
+    }
+  }
 
   private def createNewToken(user: User) = {
     val newToken = Token()
-    val newSession = Session(newToken, user)
+    val newSession = Session(user, newToken)
     connection.addSession(newSession)
 
     complete(HttpEntity(ContentTypes.`application/json`, Json.toJson(newToken).toString()))
@@ -56,24 +62,47 @@ object Main extends App {
     complete(HttpEntity(ContentTypes.`application/json`, Json.toJson(connection.users()).toString()))
 
   private def currentUser(session: Session) =
-    complete(HttpEntity(ContentTypes.`application/json`, Json.toJson(connection.user(session.token)).toString()))
+    complete(HttpEntity(ContentTypes.`application/json`, Json.toJson(session).toString()))
+
+  private def secrets(session: Session) = {
+    complete(HttpEntity(ContentTypes.`application/json`, Json.toJson(connection.secrets(session)).toString()))
+  }
+
+  private def secret(secretid: Int)(session: Session) =
+    if (connection.hasPermission(session, secretid))
+      complete(HttpEntity(ContentTypes.`text/plain(UTF-8)`, connection.secret(secretid).fold("")(_.content)))
+    else
+      reject()
+
+  private def createSecret(session: Session)(content: String) =
+    complete(HttpEntity(ContentTypes.`text/plain(UTF-8)`, connection.secret(connection.addSecret(content, session)).fold("")(_.content)))
+
+  private def createPermission(session: Session, secretId: Int)(username: String) =
+    if (connection.hasPermission(session, secretId))
+      complete(HttpEntity(ContentTypes.`text/plain(UTF-8)`, connection.secret(connection.addPermission(secretId, User(username))).fold("")(_.content)))
+    else
+      reject()
 
   // TODO add test for /authenticate
   private def route =
     path("authenticate") {
-      get {
-        extractCredentials { credentials => authenticateBasic(realm, basicAuthenticator(credentials))(createNewToken) }
-      }
+      get(extractCredentials { credentials => authenticateBasic(realm, basicAuthenticator(credentials))(createNewToken) })
     } ~
       path("users") {
-        get {
-          authenticateOAuth2(realm, tokenAuthenticator)(allUsers)
-        }
+        get(authenticateOAuth2(realm, tokenAuthenticator)(allUsers))
       } ~
       path("users" / "current") {
-        get {
-          authenticateOAuth2(realm, tokenAuthenticator)(currentUser)
-        }
+        get(authenticateOAuth2(realm, tokenAuthenticator)(currentUser))
+      } ~
+      path("secrets") {
+        get(authenticateOAuth2(realm, tokenAuthenticator)(secrets))
+        post(authenticateOAuth2(realm, tokenAuthenticator) { session => entity(as[String])(createSecret(session)) })
+      } ~
+      path("secrets" / IntNumber) { secretid =>
+        get(authenticateOAuth2(realm, tokenAuthenticator)(secret(secretid)))
+      } ~
+      path("permission" / "secrets" / IntNumber) { secretid =>
+        post(authenticateOAuth2(realm, tokenAuthenticator) { session => entity(as[String])(createPermission(session, secretid)) })
       }
 
 
