@@ -1,6 +1,6 @@
 package database.connection
 
-import java.time.{Instant, OffsetDateTime}
+import java.time.{Instant, OffsetDateTime, ZoneId}
 
 import cats.effect.{ContextShift, IO}
 import doobie._
@@ -9,7 +9,7 @@ import model.{Secret, Session, Token, User}
 
 import scala.concurrent.ExecutionContext
 
-class PostgreSqlConnection {
+class PostgreSqlConnection extends DbConnection {
   private implicit val cs: ContextShift[IO] = IO.contextShift(ExecutionContext.global)
   private val transactor = Transactor.fromDriverManager[IO](
     "org.postgresql.Driver", "jdbc:postgresql:postgres", "postgres", "postgres")
@@ -45,33 +45,39 @@ class PostgreSqlConnection {
     loggedInUser().collect { case otherUser: User if mates.contains(otherUser) => otherUser }
   }
 
-  def addSession(session: Session): Int = {
+  def addSession(session: Session): Option[Int] = {
     val User(username, _) = session.user
     val Token(token, Some(issuedDate), Some(expiredDate)) = session.token
 
-    runSync(sql"insert into session (token, issueddate, expireddate, username) values ($token, ${issuedDate.toInstant}, ${expiredDate.toInstant}, $username)".update.run)
+    runSync(sql"insert into session (token, issueddate, expireddate, username) values ($token, ${issuedDate.toInstant}, ${expiredDate.toInstant}, $username) returning sessionid".query[Int].option)
   }
 
   def session(token: Token): Option[Session] =
     runSync(sql"select token, issueddate, expireddate, username from session where token = ${token.token}".query[(String, Instant, Instant, String)].option)
       .map { case (tokenString, issuedDate, expiredDate, username) =>
-        Session(User(username), Token(tokenString, Some(new OffsetDateTime(issuedDate)), Some(new OffsetDateTime(expiredDate))))
+        def offsetDateTime(instant: Instant) = OffsetDateTime.ofInstant(Instant.now(), ZoneId.of("Z"))
+        Session(User(username), Token(tokenString, Some(offsetDateTime(issuedDate)), Some(offsetDateTime(expiredDate))))
       }
 
-  def addSecret(content: String, session: Session): Int =
-    runSync(sql"insert into secret (content, owner) values ($content, ${session.user.username})".update.run)
+  def addSecret(content: String, user: User): Option[Int] = {
+    val secretId = runSync(sql"insert into secret (content, owner) values ($content, ${user.username}) returning secretid".query[Int].option)
+    secretId.foreach(addPermission(_, user))
+
+    secretId
+  }
 
   def secret(id: Int): Option[Secret] =
-    runSync(sql"select secretid, content, owner from session where secretid = $id".query[(Int, String, String)].option)
+    runSync(sql"select secretid, content, owner from secret where secretid = $id".query[(Int, String, String)].option)
       .map { case (secretId, content, username) =>
           Secret(secretId, content, User(username))
       }
 
   def secrets(session: Session): Vector[Int] =
     runSync(sql"select secretid from permission where username = ${session.user.username}".query[Int].to[Vector])
+    .distinct
 
-  def addPermission(secretid: Int, user: User): Int =
-    runSync(sql"insert into permission (secretid, username) values ($secretid, ${user.username})".update.run)
+  def addPermission(secretid: Int, user: User): Option[Int] =
+    runSync(sql"insert into permission (secretid, username) values ($secretid, ${user.username}) returning permissionid".query[Int].option)
 
   def hasPermission(session: Session, secretid: Int): Boolean =
     runSync(sql"select permissionid from permission where secretid = $secretid and username = ${session.user.username}".query[Int].option).isDefined
